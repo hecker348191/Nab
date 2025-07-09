@@ -24,7 +24,10 @@ class ReputationCog(commands.Cog):
         self.reaction_rep_tracker = {}  # Fixed: removed 'python' prefix
         self.last_active = {}  # Track user activity for inactivity decay
         self.repeated_messages = {} # Stores last message and timestamp for spam detection
-        self.consecutive_rep_tracker = {}  # Initialize consecutive rep tracker
+        #self.consecutive_rep_tracker = {}  # Initialize consecutive rep tracker  <-- REMOVE THIS
+
+        # Track consecutive ups/downs *for the receiver*
+        self.user_consecutive_tracker: Dict[Tuple[int, int], Dict[str, any]] = {}
 
         # In-memory storage for command usage cooldowns and daily limits
         # This data WILL be lost if the bot restarts.
@@ -49,48 +52,50 @@ class ReputationCog(commands.Cog):
 
         # NEW: Voice Channel Tracking
         self.voice_join_times: Dict[Tuple[int, int], datetime] = {}  # Store user join times in VC (user_id, guild_id): datetime
-        
-    def get_consecutive_multiplier(self, giver_id: int, receiver_id: int, guild_id: int, is_increase: bool) -> Tuple[float, int]:
+
+    def get_consecutive_multiplier(self, receiver_id: int, guild_id: int, is_increase: bool) -> Tuple[float, int]:
         """
-        Calculate the consecutive multiplier for reputation changes.
+        Calculate the consecutive multiplier for reputation changes *for a specific receiver*.
         Returns (multiplier, consecutive_count) tuple.
         """
-        key = (giver_id, receiver_id, guild_id)
+        key = (receiver_id, guild_id)
         current_time = datetime.utcnow()
-        
+
         # Get existing tracking data
-        tracker = self.consecutive_rep_tracker.get(key)
-        
+        tracker = self.user_consecutive_tracker.get(key)
+
         if not tracker:
-            # First time interaction between these users
-            self.consecutive_rep_tracker[key] = {
+            # First time interaction for this receiver
+            self.user_consecutive_tracker[key] = {
                 'last_direction': is_increase,
                 'consecutive_count': 1,
                 'last_used': current_time
             }
             return 1.0, 1
-        
+
         # Check if the direction changed
         if tracker['last_direction'] != is_increase:
             # Direction changed, reset to 1
-            self.consecutive_rep_tracker[key] = {
+            self.user_consecutive_tracker[key] = {
                 'last_direction': is_increase,
                 'consecutive_count': 1,
                 'last_used': current_time
             }
             return 1.0, 1
-        
+
         # Same direction, increment consecutive count
         consecutive_count = tracker['consecutive_count'] + 1
         multiplier = 1.0 + (consecutive_count - 1) * 0.1  # 1.0, 1.1, 1.2, 1.3, etc.
-        
+
+        multiplier = min(multiplier, 3.0) # Cap at 3.0
+
         # Update tracker
-        self.consecutive_rep_tracker[key] = {
+        self.user_consecutive_tracker[key] = {
             'last_direction': is_increase,
             'consecutive_count': consecutive_count,
             'last_used': current_time
         }
-        
+
         return multiplier, consecutive_count
 
     async def handle_rep_change(
@@ -117,14 +122,14 @@ class ReputationCog(commands.Cog):
 
         author_rep = self.get_user_rep(giver.id, guild.id)
         author_tier, base_impact = self.get_tier_info(author_rep)
-        
+
         # Track original base impact for display
         original_base_impact = base_impact
-        
+
         # Check if user is a booster and apply multiplier
         is_booster = self.has_booster_role(giver)
         booster_multiplier = 2.0 if is_booster else 1.0
-        
+
         if is_booster:
             base_impact *= 2
 
@@ -132,9 +137,9 @@ class ReputationCog(commands.Cog):
             await self._respond(interaction_or_ctx, "You can't affect others' scores.")
             return
 
-        # Get consecutive multiplier
-        consecutive_multiplier, consecutive_count = self.get_consecutive_multiplier(giver.id, receiver.id, guild.id, increase)
-        
+        # Get consecutive multiplier (using the *receiver's* history)
+        consecutive_multiplier, consecutive_count = self.get_consecutive_multiplier(receiver.id, guild.id, increase)
+
         # Apply consecutive multiplier and round to nearest whole number
         final_impact = round(base_impact * consecutive_multiplier)
 
@@ -151,19 +156,20 @@ class ReputationCog(commands.Cog):
             ),
             color=0x00ff00 if increase else 0xff0000
         )
-        
+
         # Add detailed breakdown
         breakdown_text = f"**Base Impact:** {original_base_impact} ({author_tier})\n"
-        
+
         if is_booster:
             breakdown_text += f"**Booster Bonus:** ×{booster_multiplier} → {original_base_impact * booster_multiplier}\n"
-        
-        if consecutive_count > 1:
-            breakdown_text += f"**Consecutive Bonus:** ×{consecutive_multiplier:.1f} (#{consecutive_count} consecutive {'up' if increase else 'down'})\n"
-            breakdown_text += f"**Final Calculation:** {base_impact} × {consecutive_multiplier:.1f} = {final_impact}\n"
-        
+
+        # REMOVE THIS SECTION FROM HERE
+        #if consecutive_count > 1:
+        #    breakdown_text += f"**Consecutive Bonus:** �{consecutive_multiplier:.1f} (#{consecutive_count} consecutive {'up' if increase else 'down'})\n"
+        #    breakdown_text += f"**Final Calculation:** {base_impact} � {consecutive_multiplier:.1f} = {final_impact}\n"
+
         breakdown_text += f"**Applied Change:** {'+' if increase else '-'}{abs(delta)}"
-        
+
         embed.add_field(name="Calculation Breakdown", value=breakdown_text, inline=False)
 
         new_rep = self.get_user_rep(receiver.id, guild.id)
@@ -271,7 +277,7 @@ class ReputationCog(commands.Cog):
         min_rep, max_rep = -1, -5
         rep = min_rep + (max_rep - min_rep) * (hour - 1) / 7
         return round(rep)
-        
+
     def has_low_quality_role(self, member: discord.Member) -> bool:
         return any(role.name == "Low Quality" for role in member.roles)
 
@@ -356,8 +362,8 @@ class ReputationCog(commands.Cog):
             return True, ""
 
         # If it's the same day, check the daily limit
-        if daily_count >= 5:
-            return False, "You've reached your daily limit of 5 reputation uses. Try again after 00:01 EST."
+        if daily_count >= 10:
+            return False, "You've reached your daily limit of 10 reputation uses. Try again after 00:01 EST."
 
         # Check the 30-minute cooldown
         time_diff = current_utc_timestamp - last_used_timestamp
@@ -458,7 +464,7 @@ class ReputationCog(commands.Cog):
     async def rep_slash(self, interaction: discord.Interaction, user: Optional[discord.Member] = None):
         user = user or interaction.user
         await self.display_rep(interaction, user)
-        
+
     async def display_rep(self, ctx_or_interaction, user: discord.Member):
         """Displays a user's reputation, with detailed impact info."""
         user_id = user.id
@@ -477,9 +483,9 @@ class ReputationCog(commands.Cog):
         # Get example consecutive multiplier based on past tracking
         # This is approximate because direction (up/down) isn't known here
         max_consecutive = 1.0
-        for key, tracker in self.consecutive_rep_tracker.items():
-            if key[0] == user_id and key[2] == guild_id:
-                max_consecutive = max(max_consecutive, 1.0 + (tracker['consecutive_count'] - 1) * 0.1)
+        #for key, tracker in self.consecutive_rep_tracker.items():  <-- REMOVE THIS
+        #    if key[0] == user_id and key[2] == guild_id:
+        #        max_consecutive = max(max_consecutive, 1.0 + (tracker['consecutive_count'] - 1) * 0.1)
 
         final_impact = round(boosted_impact * max_consecutive)
 
@@ -495,12 +501,6 @@ class ReputationCog(commands.Cog):
 
         boost_info = f"×{booster_multiplier} (Nitro Booster)" if is_booster else "×1 (No boost)"
         embed.add_field(name="Booster Multiplier", value=boost_info, inline=True)
-
-        embed.add_field(
-            name="Example Consecutive Multiplier",
-            value=f"×{max_consecutive:.1f} (based on past usage)",
-            inline=True
-        )
 
         embed.add_field(
             name="Final Potential Impact",
@@ -670,12 +670,12 @@ class ReputationCog(commands.Cog):
             total_pages_display = total_full_list_pages + 1
             embed.set_footer(text=f"Page {page}/{total_pages_display}")
             await interaction.response.send_message(embed=embed, ephemeral=True)
-        
+
     @app_commands.command(name="up", description="Give a user positive reputation")
     @app_commands.describe(user="The user to upvote")
     async def up_slash(self, interaction: discord.Interaction, user: discord.Member):
         await self.handle_rep_change(interaction.user, user, interaction.guild, increase=True, interaction_or_ctx=interaction)
-    
+
     @commands.command()
     @commands.cooldown(rate=1, per=60, type=BucketType.user)
     async def up(self, ctx, user: discord.Member):
@@ -683,11 +683,11 @@ class ReputationCog(commands.Cog):
         if ctx.author.id == user.id:
             await ctx.send("You can't give reputation to yourself!", delete_after=30)
             return
-        
+
         if user.bot:
             await ctx.send("You can't give reputation to bots!", delete_after=30)
             return
-        
+
         # Check rate limits BEFORE doing anything else
         allowed, reason = self.can_use_rep_command(ctx.author.id, ctx.guild.id)
         if not allowed:
@@ -705,13 +705,19 @@ class ReputationCog(commands.Cog):
             await ctx.send("You can't affect others' scores.", delete_after=30)
             return
 
+        # Get consecutive multiplier (using the *receiver's* history)
+        consecutive_multiplier, consecutive_count = self.get_consecutive_multiplier(user.id, ctx.guild.id, True)
+
+        # Apply consecutive multiplier and round to nearest whole number
+        final_impact = round(impact * consecutive_multiplier)
+
         # Update usage tracking (in-memory)
         self.update_rep_usage(ctx.author.id, ctx.guild.id)
-        self.adjust_rep(user.id, ctx.guild.id, impact)
+        self.adjust_rep(user.id, ctx.guild.id, final_impact)  # Use final_impact here
 
         embed = discord.Embed(
             title=" Reputation Increased",
-            description=f"{user.mention} received **+{impact}** reputation from {ctx.author.mention}",
+            description=f"{user.mention} received **+{final_impact}** reputation from {ctx.author.mention}", # Use final_impact here
             color=0x00ff00
         )
         new_rep = self.get_user_rep(user.id, ctx.guild.id)
@@ -719,7 +725,7 @@ class ReputationCog(commands.Cog):
         embed.add_field(name="New Score", value=f"{new_rep} ({new_tier})", inline=False)
 
         await ctx.send(embed=embed, delete_after=30)
-        
+
     @app_commands.command(name="down", description="Lower a user's reputation")
     @app_commands.describe(user="The user to downvote")
     async def down_slash(self, interaction: discord.Interaction, user: discord.Member):
@@ -755,13 +761,19 @@ class ReputationCog(commands.Cog):
             await ctx.send("You can't affect others' scores.", delete_after=30)
             return
 
+        # Get consecutive multiplier (using the *receiver's* history)
+        consecutive_multiplier, consecutive_count = self.get_consecutive_multiplier(user.id, ctx.guild.id, False)
+
+        # Apply consecutive multiplier and round to nearest whole number
+        final_impact = round(impact * consecutive_multiplier)
+
         # Update usage tracking (in-memory)
         self.update_rep_usage(ctx.author.id, ctx.guild.id)
-        self.adjust_rep(user.id, ctx.guild.id, -impact)
+        self.adjust_rep(user.id, ctx.guild.id, -final_impact) # Use -final_impact
 
         embed = discord.Embed(
             title=" Reputation Decreased",
-            description=f"{user.mention} lost **-{impact}** reputation from {ctx.author.mention}",
+            description=f"{user.mention} lost **-{final_impact}** reputation from {ctx.author.mention}", # Use -final_impact
             color=0xff0000
         )
         new_rep = self.get_user_rep(user.id, ctx.guild.id)
@@ -949,4 +961,4 @@ class ReputationCog(commands.Cog):
 
 async def setup(bot):
     """Sets up the ReputationCog in the bot."""
-    await bot.add_cog(ReputationCog(bot))
+    await bot.add_cog(ReputationCog(bot)) 

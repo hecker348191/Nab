@@ -51,6 +51,49 @@ class NumberCog(commands.Cog):
         
         await member.edit(nick=f'№{user_numbers[str(member.id)]}')
         
+    @commands.command(aliases=['refreshn'])
+    async def refresh_numbers(self, ctx):
+        """Refreshes and reapplies numbers from the JSON to current members' nicknames."""
+        role_names = [role.name for role in ctx.author.roles]
+        if "II" not in role_names and "I" not in role_names:
+            await ctx.send("You do not have the required role to use this command.")
+            return
+
+        with open('user_numbers.json', 'r') as f:
+            try:
+                user_numbers = json.load(f)
+            except json.JSONDecodeError:
+                user_numbers = {}
+
+        updated_numbers = {}
+        count = 0
+        removed = 0
+
+        for member in ctx.guild.members:
+            user_id = str(member.id)
+            if user_id in user_numbers:
+                try:
+                    number = user_numbers[user_id]
+                    await member.edit(nick=f'№{number}')
+                    updated_numbers[user_id] = number
+                    count += 1
+                except discord.Forbidden:
+                    await ctx.send(f"Could not update nickname for {member.mention} (insufficient permissions).")
+            else:
+                continue
+
+        # Remove users from JSON who are no longer in the server
+        for user_id in list(user_numbers.keys()):
+            if not ctx.guild.get_member(int(user_id)):
+                removed += 1
+
+        # Save updated file
+        with open('user_numbers.json', 'w') as f:
+            json.dump(updated_numbers, f, indent=4)
+
+        await ctx.send(f"Refreshed numbers for {count} members. Removed {removed} entries for users no longer in the server.")
+
+        
     @commands.command()
     async def ln(self, ctx, number: int):
         """Locates and mentions the user with the specified number."""

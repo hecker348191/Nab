@@ -5,6 +5,7 @@ from discord.ext import commands
 load_dotenv()
 bot = commands.Bot(command_prefix='~', intents=discord.Intents.all(), help_command=None)
 from cog1 import Cog1
+from reputationcog import ReputationCog
 from LQCog import LQCog
 from wordcog import WordCounter
 from numberscog import NumberCog
@@ -15,7 +16,6 @@ from autodelete import AutoDelete
 from roletrackercog import RoleTracker
 from roletoggler import RoleToggler
 from nineball import NineBall
-from reputationcog import ReputationCog
 from wordreactions import WordReactions
 from captchacog import CaptchaCog
 from inactivitycog import InactivityCog
@@ -44,7 +44,7 @@ async def on_app_command_error(interaction: discord.Interaction, error):
     else:
         print(f"Unexpected slash command error: {error}")
         embed.title = "Unexpected Error"
-        embed.description = "An unexpected error occurred. Please try again later."
+        embed.description = "An unexpected error occurred. Please try again later.\n"+str(error)
     
     # Send ephemeral message (only visible to the user)
     if interaction.response.is_done():
@@ -58,8 +58,8 @@ async def on_ready():
 
     await bot.add_cog(Cog1(bot))
     await bot.add_cog(LQCog(bot))
-    await bot.add_cog(WordCounter(bot))
     await bot.add_cog(NumberCog(bot))
+    await bot.add_cog(WordCounter(bot))
     await bot.add_cog(BoostCog(bot))
     await bot.add_cog(NineBall(bot))
     await bot.add_cog(ProhibitedWordsCog(bot))

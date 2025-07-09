@@ -5,6 +5,7 @@ import random
 import json
 import sqlite3
 import asyncio
+import requests
 import re
 from datetime import datetime
 from discord.ext import commands
@@ -20,7 +21,7 @@ class Cog1(commands.Cog):
         self.invite_cache = {}
         self.tracked_invite_code = "qnDWXbzywE"
         self.role_name = "lunatic"  # Role to assign
-        self.kiss_messages = [
+        self.rape_messages = [
             "{author} rapes {target} brutally",
             "{author} and {target} share a passionate rapesesh",
             "{author} sneakily rapes {target}",
@@ -38,6 +39,7 @@ class Cog1(commands.Cog):
             "{author} rapes {target} repeatedly, causing them immense pain and suffering",
             "{author} rapes {target} at 5013 baldpate drive, corpus christi texas, 78413",
         ]
+
 
     # --- Bump Reminder Setup ---
         self.disboard_bot_id = 302050872324835328 # Official Disboard bot ID
@@ -103,6 +105,16 @@ class Cog1(commands.Cog):
                        (message_id, webhook_message_id))
         conn.commit()
         conn.close()
+        
+    async def get_random_gif(self,type="rape"):
+        """Gets a random GIF, avoiding recently used ones."""
+        if type == "rape":
+            gif_url = requests.get("https://api.purrbot.site/v2/img/nsfw/anal/gif",timeout=3).json()["link"]
+        elif type == "gay":
+            gif_url = requests.get("https://api.purrbot.site/v2/img/nsfw/yaoi/gif",timeout=3).json()["link"]
+        elif type == "lesbian":
+            gif_url = requests.get("https://api.purrbot.site/v2/img/nsfw/yuri/gif",timeout=3).json()["link"]
+        return gif_url
 
     def save_bump_times(self):
         """Saves current bump times to file."""
@@ -239,7 +251,7 @@ class Cog1(commands.Cog):
                 message = await channel.fetch_message(payload.message_id)
                 pinned_text = message.content
                 pinned_by = message.author
-                destination_channel = self.bot.get_channel(1386081055592681552)
+                destination_channel = self.bot.get_channel(1389744403366678583)
 
                 # Get or create webhook for the destination channel
                 webhooks = await destination_channel.webhooks()
@@ -272,8 +284,7 @@ class Cog1(commands.Cog):
                         username=username,
                         avatar_url=avatar_url
                     )
-               
-
+        
     @commands.command(name="rape")
     @commands.cooldown(rate=1, per=600, type=commands.BucketType.user)
     async def rape(self, ctx, target: discord.Member = None):
@@ -281,22 +292,101 @@ class Cog1(commands.Cog):
             await ctx.send("You need to mention someone to rape!", delete_after=30)
             return
         if target == ctx.author:
-            await ctx.send("You can't rape yourself... or can you? 🤨", delete_after=30)
+            await ctx.send("You can't rape yourself... or can you? 廊", delete_after=30)
             return
 
-        msg = random.choice(self.kiss_messages).format(
+        msg = random.choice(self.rape_messages).format(
             author=ctx.author.mention,
             target=target.mention
         )
-        await ctx.send(msg, delete_after=30)
+        gif_url = await self.get_random_gif("rape")
+
+        embed = discord.Embed(description=msg)
+        embed.set_image(url=gif_url)
+
+        await ctx.send(embed=embed, delete_after=120)
         
+        # Schedule removal from used_gifs after cooldown
+        await asyncio.sleep(self.gif_cooldown)
+        if gif_url in self.used_gifs:
+            self.used_gifs.remove(gif_url)
+
+
+    @commands.command(name="gay")
+    @commands.cooldown(rate=1, per=600, type=commands.BucketType.user)
+    async def gay(self, ctx, target: discord.Member = None):
+        if target is None:
+            await ctx.send("You need to mention someone !", delete_after=30)
+            return
+        if target == ctx.author:
+            await ctx.send("You are gay...", delete_after=30)
+            return
+
+        msg = f"{target.mention} is gay."
+        gif_url = await self.get_random_gif("gay")
+
+        embed = discord.Embed(description=msg)
+        embed.set_image(url=gif_url)
+
+        await ctx.send(embed=embed, delete_after=120)
+        
+        # Schedule removal from used_gifs after cooldown
+        await asyncio.sleep(self.gif_cooldown)
+        if gif_url in self.used_gifs:
+            self.used_gifs.remove(gif_url)
+            
+    @commands.command(name="lesbian")
+    @commands.cooldown(rate=1, per=600, type=commands.BucketType.user)
+    async def lesbian(self, ctx, target: discord.Member = None):
+        if target is None:
+            await ctx.send("You need to mention someone !", delete_after=30)
+            return
+        if target == ctx.author:
+            await ctx.send("You are lesbian...", delete_after=30)
+            return
+
+        msg = f"{target.mention} is lesbian."
+        gif_url = await self.get_random_gif("lesbian")
+
+        embed = discord.Embed(description=msg)
+        embed.set_image(url=gif_url)
+
+        await ctx.send(embed=embed, delete_after=120)
+        
+        # Schedule removal from used_gifs after cooldown
+        await asyncio.sleep(self.gif_cooldown)
+        if gif_url in self.used_gifs:
+            self.used_gifs.remove(gif_url)
+    
     @rape.error
     async def rape_error(self, ctx, error):
         if isinstance(error, commands.CommandOnCooldown):
             minutes = int(error.retry_after // 60)
             seconds = int(error.retry_after % 60)
             await ctx.send(f"⏳ You need to wait {minutes}m {seconds}s before using `rape` again.", delete_after=10)
-
+    @gay.error
+    async def gay_error(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            minutes = int(error.retry_after // 60)
+            seconds = int(error.retry_after % 60)
+            await ctx.send(f"⏳ You need to wait {minutes}m {seconds}s before using `rape` again.", delete_after=10)
+            
+    @rape.error
+    async def lesbian_error(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            minutes = int(error.retry_after // 60)
+            seconds = int(error.retry_after % 60)
+            await ctx.send(f"⏳ You need to wait {minutes}m {seconds}s before using `rape` again.", delete_after=10)
+            
+    @commands.command(name="testgifs")
+    @commands.has_permissions(administrator=True)
+    async def testgifs(self, ctx):
+        """Posts all rape_gifs to the channel for testing embedding."""
+        gif_url = await self.get_random_gif()
+        embed = discord.Embed(title="GIF Test")
+        embed.set_image(url=gif_url)
+        await ctx.send(embed=embed)
+        
     @commands.command()
     @commands.cooldown(rate=1, per=10, type=commands.BucketType.user)  # 1 use every 10 seconds per user
     async def whois(self, ctx, user: discord.Member):
@@ -312,6 +402,7 @@ class Cog1(commands.Cog):
         embed.add_field(name="Highest Role", value=user.top_role, inline=True)
         embed.add_field(name="Joined Discord", value=user.created_at.strftime("%b %d %Y %H:%M"), inline=True)
         embed.add_field(name="Joined Server", value=user.joined_at.strftime("%b %d %Y %H:%M"), inline=True)
+        os.system("echo \'whois logs: "+ctx.message.content+"\'")
         await ctx.send(embed=embed)
         
     @commands.command(name='say')
